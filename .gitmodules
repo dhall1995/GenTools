@@ -1,0 +1,3 @@
+[submodule "NucFrames"]
+	path = NucFrames
+	url = https://github.com/latkins/NucFrames.git
