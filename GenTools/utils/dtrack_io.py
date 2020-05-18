@@ -2,6 +2,7 @@
 TO DO:
     - Write datatrack_to_bed function
     - Fix datatrack_to_npz function
+    - Write bed_to_npz function
 '''
 from scipy.sparse import coo_matrix
 from scipy import sparse
@@ -208,11 +209,10 @@ def save_contacts(out_file_path, matrix_dict, chromo_limits, bin_size, min_bins=
     
 
 ###################################################################
-def datatrack_from_npz(file_path,
-                    ID = False,
-                    values_key = 'values',
-                    params = False
-                   ):
+def rvps_from_npz(file_path,
+                  ID = False,
+                  values_key = 'values',
+                  params = False):
     """Load track data (e.g. ChIp-seq)from Numpy archive (.npz)
     
     Arguments:
@@ -280,15 +280,15 @@ def datatrack_from_npz(file_path,
     return regions_dict, values_dict, ID_dict
 
 ###################################################################
-def datatrack_from_bed(file_path,
-                       chrom_col = 0,
-                       region_cols = (1,2),
-                       value_col = None,
-                       ID_col = None,
-                       value_fill = 1,
-                       header = None,
-                       allowed_chroms = None,
-                       sep = "\t"):
+def rvps_from_bed(file_path,
+                  chrom_col = 0,
+                  region_cols = (1,2),
+                  value_col = None,
+                  ID_col = None,
+                  value_fill = 1,
+                  header = None,
+                  allowed_chroms = None,
+                  sep = "\t"):
     """Load track data (e.g. ChIp-seq)from Numpy archive (.npz)
     
     Arguments:
@@ -374,65 +374,117 @@ def datatrack_from_bed(file_path,
     return regions_dict, values_dict, ID_dict
     
 ###################################################################
-def datatrack_to_npz(dtrack,
-                    chrlims,
-                    binSize,
-                    out_path,
-                    track_name,
-                    ID = False):
-    """Load track data (e.g. ChIp-seq)from Numpy archive (.npz)
-    
+def rvps_to_npz(regions,
+                values,
+                track_name,
+                out_path,
+                IDs = None,
+                params = None
+               ):
+    """Save track data (e.g. ChIp-seq) to  Numpy archive (.npz)
     Arguments:
-    
-    - dtrack: Datatrack array. Assumes a 1-dimensional array of length N where N
-              is the total number of bins across all chromosomes (effectively
-              where chromosomes have been concatenated with one another starting
-              with chromsome 1, 2 etc. and ending with chromosome X
-    - chrlims: Dictionary detailing the start and end basepairs of each chromosome
-               in the contact dictionary. NOTE: the chromosome limits are inclusive
-               i.e. for each CHR_A we should have chromo_limits[CHR_A] = (start_A,
-               end_A) where all basepairs b on this chromsome satisfy:
-                                 start_A <= b <= end_A 
-    - binSize: Size of each chromatin bin in basepairs
-    - out_path: Path to save the datatrack to. 
-    - track_name: Name of the datatrack e.g. Nanog_hapmESC for haploid mouse embryonic
-                  stem cell Nanog ChIP-seq peaks
-    
-    ## TO DO: Add in a params option when saving a datatrack
+    - regions: dictionary detialing an (N_chrom,2) shape array detailing the
+               regions of the datatrack for each chromosome.
+    - values: dictionary detialing an (N_chrom,) shape array detailing the values
+              associated with each region.
+    - track_name: Descriptive name of the datatrack.
+    - out_path: The path to save the .npz archive to.
+    - IDs: If each regions is associated with a unique ID then save these IDs
+           in a dictionary with an (N_chrom,) shape array for each chromosome.
     """
    
     outdict = {}
     
-    chromosomes = [str(i+1) for i in np.arange(19)] + ['X']
-    if not ID:
-        for chrom in chromosomes:
-            regions = np.vstack([np.arange(chrlims[chrom][0], chrlims[chrom][1] + binSize, binSize),
-                             np.arange(chrlims[chrom][0]+ binSize, chrlims[chrom][1] + 2*binSize, binSize)]).T
-            values = dtrack[np.arange((chrlims[chrom][1] - chrlims[chrom][0])/binSize),:]
+    for chrom in regions:    
+        key1 = "dtrack/regions/{}/{}".format(track_name, chrom)
+        key2 = "dtrack/values/{}/{}".format(track_name, chrom)
+        if IDs is not None:
+            key3 = "dtrack/id/{}/{}".format(track_name, chrom)
+            
+        outdict[key1] = regions[chrom]
+        if chrom in values:
+            outdict[key2] = values[chrom]
+        else:
+            print("Couldn't find chromosome {} in values. Assuming ones instead".format(chrom))
+            outdict[key2] = np.ones(regions[chrom].shape(0))
+        if IDs is not None:
+            outdict[key3] = IDs
+    
+    if params is not None:
+        outdict['params'] = params
         
-            key1 = "dtrack/regions/{}/{}".format(track_name, chrom)
-            key2 = "dtrack/values/{}/{}".format(track_name, chrom)
-            
-            outdict[key1] = regions
-            outdict[key2] = values
-    else:
-        try:
-            for chrom in chromosomes:
-                IDs = dtrack[chrom].columns.values
-                regions = np.vstack([binSize*dtrack[chrom].values[0,:],
-                                     (binSize+1)*dtrack[chrom].values[0,:]]).T
-                values = binSize*dtrack[chrom].values[1,:]
-                
-                key1 = "dtrack/regions/{}/{}".format(track_name, chrom)
-                key2 = "dtrack/values/{}/{}".format(track_name, chrom)
-                key3 = "dtrack/id/{}/{}".format(track_name, chrom)
-            
-                outdict[key1] = regions
-                outdict[key2] = values
-                outdict[key3] = IDs
-        except:
-            print("If using ID == True then dtrack must be a dictionary containing pandas dataframes detailing the position and value of each ID")
-            raise ValueError
-                                                  
-                
     np.savez(out_path, **outdict, allow_pickle = True)
+    
+###################################################################
+def rvps_to_bed(regions,
+                values,
+                track_name,
+                out_path,
+                IDs = None,
+                sep = "\t"
+               ):
+    """Save track data (e.g. ChIp-seq) to  Numpy archive (.npz)
+    Arguments:
+    - regions: dictionary detialing an (N_chrom,2) shape array detailing the
+               regions of the datatrack for each chromosome.
+    - values: dictionary detialing an (N_chrom,) shape array detailing the values
+              associated with each region.
+    - track_name: Descriptive name of the datatrack.
+    - out_path: The path to save the .npz archive to.
+    - IDs: If each regions is associated with a unique ID then save these IDs
+           in a dictionary with an (N_chrom,) shape array for each chromosome.
+    """
+    if IDs is None:
+        IDs = {}
+        
+    ID_counter = 0
+    with open(out_path,'w') as op:
+        for chromosome in regions:
+            for idx in np.arange(regions[chromosome].shape[0]):
+                region = regions[chromosome][idx,:]
+                value = values[chromosome][idx]
+                try:
+                    ID = IDs[chromosome][idx]
+                except:
+                    ID = "chr{}_{}_{}".format(chromosome,track_name, ID_counter)
+                    ID_counter += 1
+                
+                op.write(sep.join([chromosome, region[0], region[1],value, ID]))
+                op.write("\n")
+                
+        
+###################################################################
+def bed_to_npz(bed_path,
+               out_path,
+               track_name,
+               chrom_col = 0,
+               region_cols = (1,2),
+               value_col = None,
+               ID_col = None,
+               value_fill = 1,
+               header = None,
+               allowed_chroms = None,
+               sep = "\t",
+               params = None):
+    '''
+    convert a BED format region-value-pairs input to a .npz archive
+    '''
+    regions_dict, values_dict, ID_dict = rvps_from_bed(file_path,
+                                                      chrom_col = chrom_col,
+                                                      region_cols = region_cols,
+                                                      value_col = value_col,
+                                                      ID_col = ID_col,
+                                                      value_fill = value_fill,
+                                                      header = header,
+                                                      allowed_chroms = allowed_chroms,
+                                                      sep = sep)
+    if len(list(ID_dict.keys())) == 0:
+        ID_dict = None
+    
+    rvps_to_npz(regions_dict,
+                values_dict,
+                track_name,
+                out_path,
+                IDs = ID_dict,
+                params = params)
+    

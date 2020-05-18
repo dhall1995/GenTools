@@ -1,5 +1,5 @@
 from ..utils.dtrack_utils import binrvps_constantbins, binrvps, pairRegionsIntersection, rvps_to_rvps, binrvps_multi_interval
-from ..utils.dtrack_io import datatrack_from_bed, datatrack_from_npz
+from ..utils.dtrack_io import rvps_from_bed, rvps_from_npz, rvps_to_npz
 import numpy as np
 import pandas as pd
 import pyBigWig as pBW
@@ -476,10 +476,10 @@ class DataTrack_rvp(DataTrack):
             - **kwargs: Extra arguments to be passed to io.load_data_track
         '''
         if params:
-            self.params = datatrack_from_npz(npz_file, params = params)
+            self.params = rvps_from_npz(npz_file, params = params)
             params = False
         
-        regs, vals, IDs = datatrack_from_npz(npz_file, **kwargs)
+        regs, vals, IDs = rvps_from_npz(npz_file, **kwargs)
         
         return self.from_region_value_id_dicts(regs,vals, IDs)
                     
@@ -494,11 +494,51 @@ class DataTrack_rvp(DataTrack):
             - file_path: Path of the data track to be loaded
             - **kwargs: Extra arguments to be passed to dtrack_io.load_data_track_from_bed
         '''
-        regs, vals, IDs = datatrack_from_bed(file_path = bed, **kwargs)
+        regs, vals, IDs = rvps_from_bed(file_path = bed, **kwargs)
         
         return self.from_region_value_id_dicts(regs, vals, IDs)
 
-    
+    def to_npz(self, name, out_path, name = None):
+        '''
+        Output a datatrack to a .npz archive
+        '''
+        inputIDs = None
+        if len(self.IDs.keys()) != 0:
+            inputIDs = self.IDs
+            
+        inputparams = None
+        if len(self.params.keys()) != 0:
+            inputparams = self.params
+            
+        if name is None:
+            name = self.name
+        rvps_to_npz(self.regions,
+                    self.values,
+                    name,
+                    outpath,
+                    IDs = inputIDs,
+                    params = inputparams)
+        
+    def to_bed(out_path,
+               name = None,
+               sep = "\t"):
+        '''
+        Output a datatrack to a BED file
+        '''
+        inputIDs = None
+        if len(self.IDs.keys()) != 0:
+            inputIDs = self.IDs
+        
+        if name is None:
+            name = self.name
+        
+        rvps_to_bed(self.regions,
+                    self.values,
+                    name,
+                    out_path,
+                    IDs = inputIDs,
+                    sep = sep)
+        
 ####################################################################################################
 ####################################################################################################
 ####################################################################################################
