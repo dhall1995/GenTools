@@ -498,7 +498,7 @@ class DataTrack_rvp(DataTrack):
         
         return self.from_region_value_id_dicts(regs, vals, IDs)
 
-    def to_npz(self, name, out_path, name = None):
+    def to_npz(self, out_path, name = None):
         '''
         Output a datatrack to a .npz archive
         '''
@@ -512,6 +512,7 @@ class DataTrack_rvp(DataTrack):
             
         if name is None:
             name = self.name
+            
         rvps_to_npz(self.regions,
                     self.values,
                     name,
