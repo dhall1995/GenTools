@@ -20,18 +20,25 @@ def non_overlapping(ndarray[int, ndim=2] regions):
     - nonoverlapping: An (M,2) shape array where each row details a covered region. The regions in the output array
                       will be sorted by start position and non-overlapping with each other. 
     '''
-    cdef ndarray[int, ndim=2] sorter = zeros((2*regions.shape[0],2))
-    dtype = [('position', 'int32'), ('type','int32')]
-    values = [(regions[i,0],1) for i in np.arange(regions.shape[0])] + [(regions[i,1],-1) for i in np.arange(regions.shape[0])]
-    values = np.array(values, dtype = dtype)
-    values = np.sort(values, order='position')
-            
+    cdef int idx, jdx, nr = len(regions)
+    cdef ndarray[int, ndim=2] outregs = zeros((nr,2),int32)
+    cdef ndarray[int, ndim=2] values = zeros((2*regions.shape[0],2), int32)
+    for idx in range(nr):
+        values[idx,0] = regions[idx,0]
+        values[idx,1] = 1
+        values[idx+nr,0] = regions[idx,1]
+        values[idx+nr,1] = -1
+    cdef ndarray[int, ndim=1] order = array(values[:,0].argsort(), int32)
+    
     cdef int total = 0
-    outregs = []
+    cdef int new_point = 0
+    cdef int valtype = 0
     cdef int current_start = 0
     cdef int current_end = 0
-    for idx in np.arange(values.shape[0]):
-        new_point, valtype = values[idx]
+    cdef int out_idx = 0
+    for idx in np.arange(2*nr):
+        jdx = order[idx]
+        new_point, valtype = values[jdx]
         total += valtype
         if valtype <0:
             current_end = new_point
@@ -40,14 +47,17 @@ def non_overlapping(ndarray[int, ndim=2] regions):
             current_start = new_point
                 
         if total == 0:
-            outregs.append([current_start, current_end])
+            outregs[out_idx,0] = current_start
+            outregs[out_idx,1] = current_end
+            out_idx += 1
             
-    return np.array(outregs).astype('int32')
+    return outregs[:out_idx,:]
 
 
 def pairRegionsIntersection(ndarray[int, ndim=2] pairs,
                             ndarray[int, ndim=2] regions,
-                            exclude=False, allow_partial=False):
+                            exclude=False, allow_partial=False,
+                            bool_out=False):
     '''
     Given an list of pairs of the form [a,b] where a<b and regions of the form [c,d] we want to return the indices
     (within the pair list) of pairs which overlap with the regions. This will be used to exclude certain regions of the
@@ -74,6 +84,7 @@ def pairRegionsIntersection(ndarray[int, ndim=2] pairs,
     cdef int i, j, k, a, b
     cdef int exc = int(exclude)
     cdef int partial = int(allow_partial)
+    cdef int bool_o = int(bool_out)
     cdef int ni = 0
     cdef int np = len(pairs)
     cdef int nr = len(regions)
@@ -100,12 +111,19 @@ def pairRegionsIntersection(ndarray[int, ndim=2] pairs,
                 #Pair is at least partially overlapping with the region
                 if partial:
                     indices[i] = 1
+                    if bool_o:
+                        return 1
                     continue
                 elif (regs[j,1] >= pairs[i,1]) and (pairs[i,0] >= regs[j,0]):
                     #Pair is entirely containing within the region
                     indices[i] = 1
+                    if bool_o:
+                        return 1
                     continue
-
+    
+    if bool_o:
+        return 0
+    
     for i in range(np):
         if indices[i] == 1:
             indices_out[ni] = i
@@ -113,10 +131,9 @@ def pairRegionsIntersection(ndarray[int, ndim=2] pairs,
     
     return indices_out[:ni]
 
-
-def multi_pairRegionsIntersection(ndarray[int, ndim=2] pairs,
-                                  ndarray[int, ndim=2] regions,
-                                  exclude=False, allow_partial=False):
+def multi_pairRegionsIntersection(ndarray[int, ndim=3] pairs,
+                                  ndarray[int, ndim=3] regions,
+                                  exclude=False, allow_partial=False, indices = False):
     '''
     Given an list of pairs of the form [a,b] where a<b and regions of the form [c,d] we want to work pairwise to
     return the region indices of the regions which overlap with each pair.
@@ -137,32 +154,46 @@ def multi_pairRegionsIntersection(ndarray[int, ndim=2] pairs,
                       
     Returns:
     
-    - indices: An (N,K) shape array where each row contains regions indices (or -1) to detail the region indices
-               of the regions overlapping with each pair. -1 indicates that no more regions overlap with that pair
+    - out: A maximum of an (N*M,2) shape array where each column details a pair group index and a regions group
+           index where than pair group and that region group overlap. This is essentially gonna be in COO
+           format
     '''
-    cdef int i, 
-    cdef int npairs = len(pairs)
-    cdef int nregs = len(regions)
+    cdef int i, j, k, np, nr,nl
     cdef int overlap
-    cdef int maxoverlap = 0
-    cdef ndarray[int, ndim=1] temp_pair_output
-    cdef ndarray[int, ndim=2] out = -ones((npairs, nregs), int32)
+    cdef int ind = int(indices)
+    cdef int maxnp = len(pairs[0,:,0]) 
+    cdef int maxnr = len(regions[0,:,0])
+    cdef int minpairs = nmin(pairs)
+    cdef int minregions = nmin(regions)
+    cdef int npairgroups = len(pairs)
+    cdef int nreggroups = len(regions)
+    cdef ndarray[int, ndim=2] out = zeros((npairgroups*nreggroups,2), int32)
     
-    for i in range(npairs):
-        temp_pair_output = pairRegionsIntersection(regions,
-                                                   pairs[i,:].reshape(1,2),
-                                                   allow_partial = allow_partial,
-                                                   exclude = exclude)
-        
-        overlap = len(temp_pair_output)
-        
-        out[i,:overlap] = temp_pair_output
-        
-        if overlap > maxoverlap:
-            maxoverlap = overlap
-            
-    return out[:,:maxoverlap]
+    for i in range(npairgroups):
+        np = maxnp
+        for k in range(maxnp):
+            if pairs[i,k,0] == minpairs:
+                np = k
+                break
+        for j in range(nreggroups):
+            nr = maxnr
+            for k in range(maxnr):
+                if regions[j,k,0] == minregions:
+                    nr = k
+                    break
 
+            overlap = pairRegionsIntersection(pairs[i,:np,:],
+                                              regions[j,:nr,:],
+                                              allow_partial = allow_partial,
+                                              exclude = exclude,
+                                              bool_out = True)
+            if overlap == 1:
+                out[nl,0] = i
+                out[nl,1] = j
+                nl +=1
+    
+    return out[:nl,:]
+                
 
 def pairRegionsOverlap(ndarray[int, ndim=2] pairs,
                        ndarray[int, ndim=2] regions,

@@ -81,7 +81,7 @@ class Feature(object):
     
     def add_parent(self,
                    parent,
-                   parent_type):
+                   parent_type = None):
         '''
         Function to add a parent feature to a given feature. The child is stored in the self.parent 
         dictionary under the key given by child_type. If no parent_type is supplied then the parent_type
@@ -104,7 +104,7 @@ class Feature(object):
         if parent_type in self.parents:
             self.parents[parent_type].append(parent)
         else:
-            self.parent[parent_type] = [parent]
+            self.parents[parent_type] = [parent]
     
     def get_child_ids(self, child_type):
         '''
@@ -148,7 +148,7 @@ class Feature(object):
                      self.parents[parent_type]
         '''
         if parent_type not in self.parents:
-            raise ValueError("{} not in self.parents.".format(parent_type)
+            raise ValueError("{} not in self.parents.".format(parent_type))
         elif len(self.children[parent_type]) == 0:
             raise ValueError("No parents in self.parents[{}]".format(parent_type))
             
@@ -211,7 +211,7 @@ class Feature(object):
         '''
         return [key for key in self.attrs]
         
-class Feature_single_condition(Feature_single_condition):
+class Feature_single_condition(Feature):
     '''
     Essentially the same as a normal feature except that it is one which we observe within
     a single cell. An example of this would be a chromatin 'hub' where one anchor region
@@ -224,11 +224,11 @@ class Feature_single_condition(Feature_single_condition):
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Feature_sc, self).__init__(ftype,
-                                         fid,
-                                         attrs = attrs,
-                                         parents = parents,
-                                         children = children)
+        super(Feature_single_condition, self).__init__(ftype,
+                                                       fid,
+                                                       attrs = attrs,
+                                                       parents = parents,
+                                                       children = children)
         self.attrs['condition'] = condition
                              
                              
@@ -244,47 +244,57 @@ class Feature_single_cell(Feature_single_condition):
                  fid,
                  cell,
                  condition,
-                 attrs,
+                 attrs = None,
                  parents = None,
                  children = None
                 ):
-        super(Feature_sc, self).__init__(ftype,fid, parents, children, condition)
+        super(Feature_single_cell, self).__init__(ftype,
+                                                  fid,
+                                                  condition,
+                                                  attrs = attrs,
+                                                  parents = parents,
+                                                  children = children)
         self.attrs['cell'] = cell
 
 '''
 GENERAL FEATURE FUNCTIONS
 '''
-def link_features(parent_list,
-                  child_list,
-                  parent_key = 'regions',
-                  child_key = 'regions',
-                  parent_preprocess = lambda x: x,
-                  child_preprocess = lambda x: x,
-                  child_type = None,
-                  parent_type = None
-                 ):
-    if child_type is None:
-        try:
-            child_type = child_list[0].type
-        except:
-            ValueError("Looks like children in child_list aren't Feature objects! Stopping.")
-    if parent_type is None:
-        try:
-            parent_type = parent_list[0].type
-        except:
-            ValueError("Looks like parents in parent_list aren't Feature objects! Stopping.")
-                             
-    pregions = np.empty((0,2))
-    cregions = np.empty((0,2))
-    for feature in parent_list:
-        pregions = np.append(pregions, parent_preprocess(feature.attrs[parent_key], axis = 0)
-    for feature in child_list:
-        cregions = np.append(cregions, child_preprocess(feature.attrs[child_key], axis = 0)
+def link_features(parent_regions,
+                  child_regions):
+    '''
+    Given some list of regions associated with each parent and child, this returns an (N,2) shape
+    array detailing the links between parents and children. 
+    Arguments:
+    parent_regions: A list of (M,2) shape arrays (one per parent) which need not be the same length
+                    but which detail the regions associated with each parent.
+    child_regions: A list of (M,2) shape arrays (one per child) which need not be the same length
+                   but which detail the regions associated with each child.
     
-    pchildren = dtu.multi_pairRegionsIntersection(pregions.astype('int32'),cregions.astype('int32'))
-    cparents = dtu.multi_pairRegionsIntersection(cregions.astype('int33'), pregions.astype('int32'))
+    Returns:
+    Links: (N,2) shape array (essentially a COO format sparse matrix) where each row details 
+           a link between a parent and a child. 
+    '''
     
-    pchildren, cparents
+    biggest_p = np.max([region.shape[0] for region in parent_regions])
+    biggest_c = np.max([region.shape[0] for region in child_regions])
+    
+    smallest_p = np.min([np.min(region) for region in parent_regions])
+    smallest_c = np.min([np.min(region) for region in child_regions])
+    
+    pregions = np.full((len(parent_regions), biggest_p, 2), smallest_p - 1)
+    cregions = np.full((len(child_regions), biggest_c, 2), smallest_c - 1)
+    
+    for idx in np.arange(len(parent_regions)):
+        pregion = parent_regions[idx]
+        pregions[idx,:pregion.shape[0],:] = pregion
+
+    for idx in np.arange(len(child_regions)):
+        cregion = child_regions[idx]
+        cregions[idx,:cregion.shape[0],:] = cregion
+        
+    links = dtu.multi_pairRegionsIntersection(pregions.astype('int32'),cregions.astype('int32'))
+    
+    return links
     
 '''
 SPECIFIC CLASSES
@@ -293,22 +303,23 @@ SPECIFIC CLASSES
 '''
 HUB CLASSES
 '''
-class Experimental_Hub(Feature_sc):
+class Experimental_Hub(Feature_single_cell):
     def __init__(self,
                  condition, 
                  cell,
                  chromosome,
                  contacts,
                  UID,
+                 attrs = None,
                  parents = None,
-                 children = None
-                ):
+                 children = None):
         super(Experimental_Hub, self).__init__('experimental_hub',
                                                UID,
                                                cell,
                                                condition,
-                                               parents,
-                                               children)
+                                               attrs = attrs,
+                                               parents = parents,
+                                               children = children)
         self.attrs['contacts'] = contacts
         self.attrs['chromosome'] = chromosome
         
@@ -321,9 +332,14 @@ class Hub(Feature):
     def __init__(self,
                  name,
                  chromosome,
+                 attrs = None,
                  parents = None,
                  children = None):
-        super(Hub, self).__init__('Hub', name, parents, children)
+        super(Hub, self).__init__('Hub',
+                                  name,
+                                  attrs = attrs,
+                                  parents = parents,
+                                  children = children)
         self.attrs['chromosome'] = chromosome
         self.attrs['conditions'] = []
         if children is None:
@@ -337,7 +353,7 @@ class Hub(Feature):
     
     def get_contact_data(self,
                          distance_cond = None,
-                         accepted_conditions = set([0,'Rexhi','Rexlow',48]):
+                         accepted_conditions = set([0,'Rexhi','Rexlow',48])):
         data = np.empty((0,4))
         
         if len(self.children['experimental_hub']) == 0:
@@ -359,7 +375,7 @@ class Hub(Feature):
                     contact_addition = hub.attrs['contacts']
                     data = np.append(data, contact_addition, axis = 0)
          
-         return data
+        return data
 
     def get_nonoverlapping_regions(self,
                                    buffer = 1e4,
@@ -370,9 +386,9 @@ class Hub(Feature):
         if data.shape[0] == 0:
             return 0
         else:
-            if region_type = 'anchors':
+            if region_type == 'anchors':
                 regions = data[:,:2]
-            elif region_type = 'contacts':
+            elif region_type == 'contacts':
                 regions = data[:,2:]
             else:
                 regions = np.append(data[:,:2],data[:,2:],axis = 0)
@@ -403,8 +419,7 @@ class TAD(Feature_single_condition):
                  parents = None,
                  children = None):
                          
-        super(TAD,self).__init__(self,
-                                 'TAD',
+        super(TAD,self).__init__('TAD',
                                  fid,
                                  condition,
                                  attrs = attrs,
@@ -423,18 +438,17 @@ class Gene(Feature):
                  fid,
                  genebody,
                  chromosome,
-                 expression,
+                 strand,
                  promoter,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Gene,self).__init__(self,
-                                 'gene',
+        super(Gene,self).__init__('gene',
                                   fid,
                                   attrs = attrs,
                                   parents= parents,
                                   children = children)
-        self.attrs['expression'] = expression
+        self.attrs['strand'] = strand
         self.attrs['region'] = genebody
         self.attrs['chromosome'] = chromosome
         self.children['promoter'] = promoter
@@ -447,24 +461,22 @@ class Promoter(Feature):
                  fid,
                  region,
                  chromosome,
-                 promoter_type,
+                 strand,
                  gene,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Gene,self).__init__(self,
-                                 'promoter',
+        super(Promoter,self).__init__('promoter',
                                   fid,
                                   attrs = attrs,
                                   parents= parents,
                                   children = children)
         self.attrs['region'] = region
         self.attrs['chromosome'] = chromosome
-        self.attrs['promoter_type'] = promoter_type
-        self.parents['gene'] = gene                 
-                         
-                         
-                         
+        self.attrs['strand'] = strand
+        self.parents['gene'] = gene  
+                     
+                                            
                          
 '''
 Enhancer Class
@@ -478,8 +490,7 @@ class Enhancer(Feature):
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Enhancer,self).__init__(self,
-                                      'enhancer',
+        super(Enhancer,self).__init__('enhancer',
                                       fid,
                                       attrs = attrs,
                                       parents = parents,

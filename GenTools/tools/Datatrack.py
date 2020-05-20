@@ -427,7 +427,7 @@ class DataTrack_rvp(DataTrack):
     def from_region_value_id_dicts(self,
                                    regs,
                                    vals,
-                                   IDs):
+                                   IDs = None):
         '''
         Generate region-value-pair track data dictionaries of region-value pairs
         Arguments:
@@ -441,7 +441,8 @@ class DataTrack_rvp(DataTrack):
                     for each chromosome where the ith row is a unique ID corresponding
                     and to the ith region for that chromosome.
         '''
-        
+        if IDs is None:
+            IDs = {}
         for chrom in regs:      
             if chrom not in self.chromosomes:
                 self.regions[chrom] = regs[chrom].astype('int32')
@@ -461,9 +462,8 @@ class DataTrack_rvp(DataTrack):
         
     def from_npz(self,
                  npz_file,
-                 params = True,
-                 **kwargs
-                ):
+                 params = False,
+                 **kwargs):
         '''
         Generate region-value-pair track data (e.g. ChIp-seq) from Numpy archive (.npz)
         Arguments:
