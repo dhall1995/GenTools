@@ -1,4 +1,5 @@
 import numpy as np
+from ..utils.dtrack_utils import link_parent_and_child_regions, link_parent_and_child_multi_regions
 
 '''
 BASE CLASSES
@@ -281,8 +282,10 @@ def link_features(parent_regions,
     smallest_p = np.min([np.min(region) for region in parent_regions])
     smallest_c = np.min([np.min(region) for region in child_regions])
     
-    pregions = np.full((len(parent_regions), biggest_p, 2), smallest_p - 1)
-    cregions = np.full((len(child_regions), biggest_c, 2), smallest_c - 1)
+    minval = np.minimum(smallest_p, smallest_c)
+    
+    pregions = np.full((len(parent_regions), biggest_p, 2), minval - 1)
+    cregions = np.full((len(child_regions), biggest_c, 2), minval - 1)
     
     for idx in np.arange(len(parent_regions)):
         pregion = parent_regions[idx]
@@ -291,8 +294,18 @@ def link_features(parent_regions,
     for idx in np.arange(len(child_regions)):
         cregion = child_regions[idx]
         cregions[idx,:cregion.shape[0],:] = cregion
-        
-    links = dtu.multi_pairRegionsIntersection(pregions.astype('int32'),cregions.astype('int32'))
+
+    if pregions.shape[1] == 1 and cregions.shape[1] == 1:
+        links = link_parent_and_child_regions(pregions[:,0,:].astype('int32'),
+                                              cregions[:,0,:].astype('int32'),
+                                              allow_partial = True
+                                                  )
+    else:
+        links = link_parent_and_child_multi_regions(pregions.astype('int32'),
+                                                        cregions.astype('int32'),
+                                                        cutoff = minval-1,
+                                                        allow_partial = True
+                                                         )
     
     return links
     
