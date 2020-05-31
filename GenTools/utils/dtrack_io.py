@@ -487,4 +487,13 @@ def bed_to_npz(bed_path,
                 out_path,
                 IDs = ID_dict,
                 params = params)
-    
+
+######################################################################
+import pickle
+def save_obj(obj, out_path):
+    with open(out_path +'.pkl', 'wb') as f:
+        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+def load_obj(in_path):
+    with open(in_path+ '.pkl', 'rb') as f:
+        return pickle.load(f)

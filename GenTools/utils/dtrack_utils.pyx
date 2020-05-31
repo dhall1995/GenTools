@@ -286,7 +286,7 @@ def pairRegionsOverlap(ndarray[int, ndim=2] pairs,
     
     pairs = non_overlapping(pairs)
     regions = non_overlapping(regions)
-    cdef int i, j, k, a, b
+    cdef int i, j, k
     cdef int exc = int(exclude)
     #totaloverlaps index counter
     cdef int tnio = 0
@@ -298,73 +298,119 @@ def pairRegionsOverlap(ndarray[int, ndim=2] pairs,
     cdef ndarray[int, ndim=1] order = array(regions[:,0].argsort(), int32)
     #Output regions array (maximum number of possible regions would be np + nr -1
     cdef ndarray[int, ndim=2] overlap_bounds = empty(((np + nr),2), int32)
-    cdef ndarray[int, ndim=1] currentpair = empty(2, int32)
+    cdef ndarray[int, ndim=1] current_pair = empty(2, int32)
+    
     for i in range(np):
-        currentpair = pairs[i,:]
+        current_pair = pairs[i,:]
         
-        if pairs[i,1] < regions[order[0],0]:
+        if current_pair[1] < regions[order[0],0]:
             if exc:
-                overlap_bounds[tnio,:] = pairs[i,:]
+                overlap_bounds[tnio,:] = current_pair
                 tnio += 1
                 
             continue
         
-        if pairs[i,0] > regions[order[nr-1],1]:
+        if current_pair[0] > regions[order[nr-1],1]:
             if exc:
-                overlap_bounds[tnio,:] = pairs[i,:]
+                overlap_bounds[tnio,:] = current_pair
                 tnio += 1
                 
             continue
-
-        a = 0
-        b = 0
+            
         for k in range(nr):
             j = order[k]
-            
-            if (regions[j,0] <= currentpair[0]) and (currentpair[0] <= regions[j,1]):
-                if (regions[j,1] >= currentpair[1]):
-                    if exc:
-                        continue
+            if regions[j,0] < current_pair[1] and regions[j,1] > current_pair[0]:
+                #There is an overlap between this region and this pair chunk
+                if regions[j,0] <= current_pair[0] and current_pair[0] < regions[j,1]:
+                    #Start of the current pair chunk is in the region
+                    if regions[j,1] >= current_pair[1]:
+                        #Pair chunk entirely contained with a region 
+                        if exc:
+                            #If exclude then we know that this
+                            #pair can't be included - it is contained within a 
+                            #region so break the current loop and move onto the 
+                            #next pair
+                            break
+                        else:
+                            #If include then we want to add this pair chunk to the 
+                            #list of output pair chunks
+                            overlap_bounds[tnio] = current_pair
+                            tnio += 1
+                            continue
                     else:
-                        overlap_bounds[tnio,:] = currentpair
-                        tnio += 1
-                        
-                        break
-                else:
-                    if exc:
-                        currentpair[0] = regions[j,1]
+                        #Start of pair chunk is in the region, end isnt
+                        if exc:
+                            #If exclude then we just shave off the bit of this
+                            #pair that touches the reegion and continue to the 
+                            #next region
+                            current_pair[0] = regions[j,1]
+                        else:
+                            #If include then we add this overlap to the 
+                            #output and shave off the bit of the pair that overlaps
+                            #with the region and then continue on to the next region
+                            overlap_bounds[tnio,0] = current_pair[0]
+                            overlap_bounds[tnio,1] = regions[j,1]
+                            
+                            tnio += 1
+                            
+                            current_pair[0] = regions[j,1]
+                            continue
+                if regions[j,0] > current_pair[0]:
+                    #Start of the current pair chunk is lower than the start of
+                    #the region
+                    if regions[j,1] < current_pair[1]:
+                        #End of the current pair chunk is higher than the start of the
+                        #regions - i.e. region entirely contained within current
+                        #pair chunk
+                        if exc:
+                            #Since the regions are sorted we know that the lower portion
+                            #of the pair which is cutoff can't overlap with any other 
+                            #region so we add it to the output
+                            overlap_bounds[tnio,0] = current_pair[0]
+                            overlap_bounds[tnio,1] = regions[j,0]
+                            tnio += 1
+                            
+                            #We then shave the current pair to only include the bit
+                            #which didn't overlap with the current region above
+                            current_pair[0] = regions[j,1]
+                        else:
+                            #We include the overlapping region
+                            overlap_bounds[tnio,:] = regions[j,:]
+                            tnio += 1
+                            
+                            #Then shave the current pair
+                            current_pair[0] = regions[j,1]
                     else:
-                        overlap_bounds[tnio,0] = currentpair[0]
-                        overlap_bounds[tnio,1] = regions[j,1]
-                        tnio += 1
-            elif (regions[j,0] > currentpair[0]) and (currentpair[1] > regions[j,0]):
-                if (regions[j,1] >= currentpair[1]):
-                    if exc:
-                        overlap_bounds[tnio,0] = currentpair[0]
-                        overlap_bounds[tnio,1] = regions[j,0]
-                        tnio += 1
-                        
-                        break
-                    else:
-                        overlap_bounds[tnio,0] = regions[j,0]
-                        overlap_bounds[tnio,1] = currentpair[-1]
-                        tnio += 1
-                        break
-                else:
-                    if exc:
-                        overlap_bounds[tnio,0] = currentpair[0]
-                        overlap_bounds[tnio,1] = regions[j,0]
-                        
-                        tnio +=1
-                    else:
-                        overlap_bounds[tnio,:] = regions[j,:]
-                        tnio +=1
-                        
-                    currentpair[0] = regions[j,1] 
+                        #Current pair end must overlap with the region
+                        if exc:
+                            overlap_bounds[tnio,0] = current_pair[0]
+                            overlap_bounds[tnio,1] = regions[j,0]
+                            tnio +=1
+                            #Since the regions are sorted we know that
+                            #we've already got all the info out
+                            #of this pair
+                            current_pair[0] = regions[j,0]
+                            break
+                        else:
+                            overlap_bounds[tnio,0] = regions[j,0]
+                            overlap_bounds[tnio,1] = current_pair[1]
+                            tnio += 1
+                            #Since the regions are sorted we know that
+                            #there won't be any more of this pair that
+                            #is overlapping any regions so continue
+                            #to the next pair
+                            current_pair[0] = regions[j,0]
+                            break
+            elif exc and regions[j,0] > current_pair[1]:
+                #If we find ourself with a pair whose end is less
+                #than the current region start and we're also excluding
+                #then we can just go ahead and input this pair
+                overlap_bounds[tnio,:] = current_pair 
+                tnio += 1
+                break
                     
           
     return overlap_bounds[:tnio]
-
 
 def binrvps_constantbins(ndarray[int, ndim=2] regions,
                     ndarray[double, ndim=1] values,

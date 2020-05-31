@@ -1,5 +1,6 @@
 import numpy as np
-from ..utils.dtrack_utils import link_parent_and_child_regions, link_parent_and_child_multi_regions
+from ..utils.dtrack_utils import link_parent_and_child_regions, link_parent_and_child_multi_regions, non_overlapping
+from ..utils.dtrack_io import save_obj
 
 '''
 BASE CLASSES
@@ -80,6 +81,26 @@ class Feature(object):
         else:
             self.children[child_type] = [child]
     
+    def remove_child(self,
+                     child_type,
+                     child_id):
+        '''
+        Function to remove a child given some child_id
+        '''
+        if child_type not in self.children:
+            raise ValueError("{} type not in self.children".format(child_type))
+        
+        self.children[child_type] = [item for item in self.children[child_type] if item.id != child_id]
+        
+    def remove_child_type(child_type):
+        '''
+        Function to remove all children of a certain type
+        '''
+        try:
+            del self.children[child_type]
+        except:
+            print("Couldn't delete {} from self.children. It may not exist already".format(child_type))
+            
     def add_parent(self,
                    parent,
                    parent_type = None):
@@ -106,7 +127,28 @@ class Feature(object):
             self.parents[parent_type].append(parent)
         else:
             self.parents[parent_type] = [parent]
+            
+    def remove_parent(self,
+                     parent_type,
+                     parent_id):
+        '''
+        Function to remove a parent given some parent_id
+        '''
+        if parent_type not in self.parents:
+            raise ValueError("{} type not in self.parents".format(parent_type))
+        
+        self.parents[parent_type] = [item for item in self.parents[parent_type] if item.id != parent_id]
     
+    def remove_parent_type(parent_type):
+        '''
+        Function to remove all children of a certain type
+        '''
+        try:
+            del self.parents[parent_type]
+        except:
+            print("Couldn't delete {} from self.parents. It may not exist already".format(parent_type))
+            
+            
     def get_child_ids(self, child_type):
         '''
         Return the .id attributes of the children within self.children[child_type]
@@ -211,6 +253,9 @@ class Feature(object):
         Return all the attribute types associated with this object
         '''
         return [key for key in self.attrs]
+    
+    def to_pickle(self, path):
+        save_obj(self, path)
         
 class Feature_single_condition(Feature):
     '''
@@ -358,15 +403,43 @@ class Hub(Feature):
         if children is None:
             self.children['experimental_hub'] = []
     
-    def add_experimental_hubs(self, exp_hub):
-        if exp_hub.chromosome == self.chromosome:
+    def add_experimental_hub(self, exp_hub):
+        if exp_hub.attrs['chromosome'] == self.attrs['chromosome']:
             self.add_child(exp_hub, 'experimental_hub')
         else:
-            print("Experimental hub chromosome doesn't match abstract hub chromosome")   
-    
+            print("Experimental hub chromosome doesn't match abstract hub chromosome") 
+            
+    def get_cells(self):
+        '''
+        Utility to return the cell names of the experimental hubs within
+        this hub system.
+        '''
+        cells = {}
+        for cell in self.children['experimental_hub']:
+            condition = cell.attrs['condition']
+            if condition not in cells:
+                cells[condition] = [cell.attrs['cell']]
+            else:
+                cells[condition].append(cell.attrs['cell'])
+                                        
+        return cells
+                                        
+    def get_conditions(self):
+        '''
+        Utility to return the conditions in which this hub is observed
+        '''
+        conds = []
+        for cell in self.children['experimental_hub']:
+            condition = cell.attrs['condition']
+            if condition not in conds:
+                conds.append(condition)
+                                        
+        return conds 
+                                        
+                                        
     def get_contact_data(self,
                          distance_cond = None,
-                         accepted_conditions = set([0,'Rexhi','Rexlow',48])):
+                         accepted_conditions = set(['naive','rexpos','rexneg','primed'])):
         data = np.empty((0,4))
         
         if len(self.children['experimental_hub']) == 0:
@@ -374,7 +447,9 @@ class Hub(Feature):
          
         for hub in self.children['experimental_hub']:
             if hub.attrs['condition'] in accepted_conditions:
-                cont_lengths = np.mean(hub.attrs['contacts'][:,2:], axis = 1) - np.mean(hub.attrs['contacts'][:,:2], axis = 1)
+                cont_lengths = abs(np.mean(hub.attrs['contacts'][:,2:],
+                                           axis = 1) - np.mean(hub.attrs['contacts'][:,:2],
+                                                               axis = 1))
                 if distance_cond is not None:
                     idxs = []
                     for idx,item in enumerate(cont_lengths):
@@ -393,28 +468,24 @@ class Hub(Feature):
     def get_nonoverlapping_regions(self,
                                    buffer = 1e4,
                                    distance_cond = None,
-                                   accepted_conditions = set([0,'Rexhi','Rexlow',48]),
+                                   accepted_conditions = set(['naive','rexpos','rexneg','primed']),
                                    region_type = 'regions'):
         data = self.get_contact_data(distance_cond, accepted_conditions)
         if data.shape[0] == 0:
-            return 0
+            return None
         else:
             if region_type == 'anchors':
-                regions = data[:,:2]
+                regions = np.floor(np.mean(data[:,:2],axis = 1))
             elif region_type == 'contacts':
-                regions = data[:,2:]
+                regions = np.floor(np.mean(data[:,2:],axis = 1))
             else:
-                regions = np.append(data[:,:2],data[:,2:],axis = 0)
-            for idx, item in enumerate(regions):
-                if regions[idx,0] > regions[idx,1]:
-                    c0 = regions[idx,0]
-                    c1 = regions[idx,1]
-                    regions[idx,0] = c1
-                    regions[idx,1] = c0
+                regions = np.floor(np.mean(np.append(data[:,:2],data[:,2:],axis = 0),axis = 1))
+
+            regions = np.repeat(regions[:,None],2,axis = 1)
             regions[:,0] -= (buffer*np.ones((regions.shape[0],))).astype('int32')
             regions[:,1] += (buffer*np.ones((regions.shape[0],))).astype('int32')
             
-        return non_overlapping(regions)
+        return non_overlapping(regions.astype('int32'))
 
 '''
 TAD Class
@@ -452,7 +523,7 @@ class Gene(Feature):
                  genebody,
                  chromosome,
                  strand,
-                 promoter,
+                 promoter = None,
                  attrs = None,
                  parents = None,
                  children = None):
@@ -464,7 +535,8 @@ class Gene(Feature):
         self.attrs['strand'] = strand
         self.attrs['region'] = genebody
         self.attrs['chromosome'] = chromosome
-        self.children['promoter'] = promoter
+        if promoter is not None:
+            self.children['promoter'] = promoter
                          
 '''
 Promoter Class
@@ -475,7 +547,7 @@ class Promoter(Feature):
                  region,
                  chromosome,
                  strand,
-                 gene,
+                 gene = None,
                  attrs = None,
                  parents = None,
                  children = None):
@@ -487,7 +559,8 @@ class Promoter(Feature):
         self.attrs['region'] = region
         self.attrs['chromosome'] = chromosome
         self.attrs['strand'] = strand
-        self.parents['gene'] = gene  
+        if gene is not None:
+            self.parents['gene'] = gene  
                      
                                             
                          
@@ -510,6 +583,6 @@ class Enhancer(Feature):
                                       children = children)
         self.attrs['region'] = region
         self.attrs['chromosome'] = chromosome
-        self.attrs['ehancer_type'] = enhancer_type
+        self.attrs['enhancer_type'] = enhancer_type
                          
         
