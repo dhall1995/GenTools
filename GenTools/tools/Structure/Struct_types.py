@@ -1,10 +1,13 @@
-class Tertiary_Struct(object):
+from ..Feature import Feature
+
+class Tertiary_Struct(Feature):
     '''
     Tertiary Configuration Class - i.e. a structure with just a single, unbroken string
     '''
     def __init__(self,
-                 name,
-                 lims = None,
+                 UID,
+                 region,
+                 contacts = None,
                  bins = None,
                  pos = None
                 ):
@@ -20,14 +23,21 @@ class Tertiary_Struct(object):
                bin our tertiary config into.
         pos - 
         '''
-        self.name = name
-        if lims is None:
-            self.lims = []
+        
+        
+        if contacts is None:
+            self.attrs['contacts'] = []
         else:
-            self.lims = lims
+            self.attrs['contacts'] = contacts
             
         if bins is None:
             #default binSize of 1bp
-            self.bins = 1
+            self.attrs['bins'] = 1
+        else:
+            self.attrs['bins'] = bins
             
+        if pos is None:
+            self.attrs['positions'] = np.empty((0,0,3))
+        else:
+            self.attrs['positions'] = pos
         

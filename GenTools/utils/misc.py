@@ -1,5 +1,37 @@
 import numpy as np
 
+def moving_average(a, n=3):
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+
+def safe_divide(x,y,fill_value = 1):
+    out = np.full(x.shape, fill_value)
+    
+    out[y!=0] = np.divide(x[y!=0],y[y!=0])
+    return out
+
+
+def same_set(set1, set2):
+    intersection = set1.intersection(set2)
+    
+    if len(list(set1)) == len(list(intersection)) and len(list(set2)) == len(list(intersection)):
+        return True
+    else:
+        return False
+
+
+def round_p_value(p):
+    i = 0
+    while p < 1:
+        p *=10
+        i += 1
+        if i > 30:
+            break
+
+    return i, np.floor(100*p)/100
+    
+
 def one_hot(chrom): 
     '''
     Encodes a chromosome as a one-hot length 20 vector.

@@ -62,7 +62,8 @@ class DataTrack():
     
     def data_in_interval(self,
                          interval):
-        return None 
+        return None
+    
  
  
 class DataTrack_rvp(DataTrack):
@@ -424,6 +425,38 @@ class DataTrack_rvp(DataTrack):
             
         return out
                               
+    def plot_in_region(self,
+                       interval,
+                       viewing_chrom,
+                       ax,
+                       binSize = 1e3,
+                       stats_type = 'mean',
+                       return_highest_val = True,
+                       col = None,
+                       **kwargs):
+        '''
+        Plot the datatrack in some region
+        '''
+        xpos,vals = self.bin_single_interval(viewing_chrom,
+                                              binSize,
+                                              interval = interval,
+                                              stats_type = stats_type,
+                                              **kwargs)
+    
+        xpos = np.mean(xpos,axis = 1)
+    
+        if col is None:
+            ax.plot(xpos, np.zeros(len(xpos)), **kwargs)
+            ax.fill_between(xpos, vals)
+        else:
+            ax.plot(xpos, np.zeros(len(xpos)), color = col, **kwargs)
+            ax.fill_between(xpos,vals, color = col)
+    
+        if return_highest_val:
+            return np.max(vals)
+        else:
+            return None
+        
     def from_region_value_id_dicts(self,
                                    regs,
                                    vals,
@@ -625,6 +658,7 @@ class DataTrack_bigwig(DataTrack):
                        chr_name,
                        bins,
                        interval= None,
+                       norm_signal_by_chrom_max = True,
                        **kwargs):
         '''
         Evaluate our datatrack for all basepairs in a given region on a given chromosome
@@ -654,11 +688,16 @@ class DataTrack_bigwig(DataTrack):
                     
             newbins = np.append(np.arange(interval[0], interval[1]+bins, bins)[:,None],
                                 np.arange(interval[0]+bins, interval[1]+2*bins, bins)[:,None], axis =1)
-            return newbins, self.data.stats(chr_name,
-                                            interval[0],
-                                            interval[1],
-                                            nBins = int((interval[1]-interval[0])/bins,
-                                            **kwargs))
+            out = self.data.stats(chr_name,
+                                  int(interval[0]),
+                                  int(interval[1]),
+                                  nBins = 2 + int((interval[1]-interval[0])/bins),
+                                  **kwargs)
+            
+            out = np.array(out)
+            if norm_signal_by_chrom_max:
+                out /= self.data.stats(chr_name, type = 'max')
+            return newbins, out
                 
         elif len(bins.shape) == 1:
             newbins = np.append(bins[:-1,None],bins[1:,None], axis =1)
@@ -667,7 +706,12 @@ class DataTrack_bigwig(DataTrack):
         
         out = []
         for mybin in newbins:
-            out.append(self.data.stats(chr_name, mybin[0],mybin[1], **kwargs))
+            out.append(self.data.stats(chr_name, int(mybin[0]),int(mybin[1]), **kwargs))
+        
+        out = np.array(out)
+        if norm_signal_by_chrom_max:
+            out /= self.data.stats(chr_name, type = 'max')
+        
         return newbins, np.array(out)
                        
                        
@@ -710,3 +754,48 @@ class DataTrack_bigwig(DataTrack):
                                                                               void_regions = void_input, **kwargs)
             
         return out
+    
+    
+    def plot_in_region(self,
+                        interval,
+                        viewing_chrom,
+                        ax,
+                        binSize = 1e3,
+                        stats_type = 'mean',
+                        norm_signal_by_chrom_max = True,
+                        return_highest_val = True,
+                        col = None,
+                        **kwargs):
+        '''
+        Plot the datatrack in some region
+        '''
+        if viewing_chrom not in self.chromosomes:
+            for chrom in self.chromosomes:
+                if viewing_chrom == chrom[3:]:
+                    viewing_chrom = chrom
+                    break
+        
+        if viewing_chrom not in self.chromosomes:
+            print("Couldn't find that chromosome in this file...")
+            return None
+        
+        xpos,vals = self.bin_single_interval(viewing_chrom,
+                                             binSize,
+                                             interval = interval,
+                                             norm_signal_by_chrom_max = norm_signal_by_chrom_max,
+                                             type = stats_type,
+                                                )
+    
+        xpos = np.mean(xpos,axis = 1)
+    
+        if col is None:
+            ax.plot(xpos, np.zeros(len(xpos)), **kwargs)
+            ax.fill_between(xpos, vals)
+        else:
+            ax.plot(xpos, np.zeros(len(xpos)), color = col, **kwargs)
+            ax.fill_between(xpos,vals, color = col)
+    
+        if return_highest_val:
+            return np.max(vals)
+        else:
+            return None

@@ -8,12 +8,10 @@ BASE CLASSES
 class Feature(object):
     '''
     Base class for our feature object. Information should be provided detailing:
-    - ftype: The type of feature e.g. promoter or hub. Note that the ftype should be timepoint
-             independent - active promoter wouldn't be a type since a promoter need not be 
-             active at all timepoints. Rather, being active is a property of a promoter at 
-             a given timepoint/ in a given condition.
     - fid: The feature ID. For example, if a gene then this would be the ensemble ID. Basically
            just a unique identifier for the feature.
+    - chromosome:
+    - region:
     
     Optional arguments:
     - parents: Often we may want to consider a feature as some sub-feature of something larger.
@@ -31,13 +29,13 @@ class Feature(object):
              
     '''
     def __init__(self,
-                 ftype,
                  fid,
+                 chromosome,
+                 regions,
                  attrs = None,
                  parents = None,
                  children = None
                 ):
-        self.type = ftype
         self.id = fid
         if parents is None:
             self.parents = {}
@@ -48,15 +46,18 @@ class Feature(object):
             self.children = {}
         else:
             self.children = children
-            
-        if attrs is None:
-            self.attrs = {}
-        else:
-            self.attrs = attrs
+        
+        self.attrs = {}
+        self.attrs['regions'] = regions
+        self.attrs['chromosome'] = chromosome
+        if attrs is not None:
+            for key in attrs:
+                self.attrs[key] = attrs[key]
+
             
     def add_child(self,
                   child,
-                  child_type = None):
+                  child_type):
         '''
         Function to add a child feature to a given feature. The child is stored in the self.children 
         dictionary under the key given by child_type. If not child_type is supplied then the child_type
@@ -69,13 +70,7 @@ class Feature(object):
                       infer the child_type from the child. However, manually specifying the child_type is
                       allowed since users may want to specify different sub-types of children of the same
                       type (e.g. hub-anchor associated promoters vs. hub-contact associated promoters)
-        '''
-        if child_type is None:
-            try:
-                child_type = child.type
-            except:
-                raise ValueError("{} not a Feature object. Child sas no attribute 'type' and no child_type passed to add_child.".format(child))
-            
+        '''    
         if child_type in self.children:
             self.children[child_type].append(child)
         else:
@@ -103,7 +98,7 @@ class Feature(object):
             
     def add_parent(self,
                    parent,
-                   parent_type = None):
+                   parent_type):
         '''
         Function to add a parent feature to a given feature. The child is stored in the self.parent 
         dictionary under the key given by child_type. If no parent_type is supplied then the parent_type
@@ -117,12 +112,6 @@ class Feature(object):
                       allowed since users may want to specify different sub-types of parent of the same
                       type (e.g. hub-anchor associated TADs vs. hub-contact associated TADs)
         '''
-        if parent_type is None:
-            try:
-                parent_type = parent.type
-            except:
-                raise ValueError("{} not a Feature object. Parent has no attribute 'type' and no parent_type passed to add_parent.".format(parent))
-            
         if parent_type in self.parents:
             self.parents[parent_type].append(parent)
         else:
@@ -264,14 +253,16 @@ class Feature_single_condition(Feature):
     makes mutliple simultaneous long distance contacts in some single-cell dataset.
     '''
     def __init__(self,
-                 ftype,
                  fid,
                  condition,
+                 chromosome,
+                 regions,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Feature_single_condition, self).__init__(ftype,
-                                                       fid,
+        super(Feature_single_condition, self).__init__(fid,
+                                                       chromosome,
+                                                       regions,
                                                        attrs = attrs,
                                                        parents = parents,
                                                        children = children)
@@ -286,17 +277,19 @@ class Feature_single_cell(Feature_single_condition):
     in some single-cell dataset.
     '''
     def __init__(self,
-                 ftype,
                  fid,
-                 cell,
                  condition,
+                 cell,
+                 chromosome,
+                 regions,
                  attrs = None,
                  parents = None,
                  children = None
                 ):
-        super(Feature_single_cell, self).__init__(ftype,
-                                                  fid,
+        super(Feature_single_cell, self).__init__(fid,
                                                   condition,
+                                                  chromosome,
+                                                  regions,
                                                   attrs = attrs,
                                                   parents = parents,
                                                   children = children)
@@ -363,23 +356,22 @@ HUB CLASSES
 '''
 class Experimental_Hub(Feature_single_cell):
     def __init__(self,
+                 UID,
                  condition, 
                  cell,
                  chromosome,
                  contacts,
-                 UID,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Experimental_Hub, self).__init__('experimental_hub',
-                                               UID,
-                                               cell,
+        super(Experimental_Hub, self).__init__(UID,
                                                condition,
+                                               cell,
+                                               chromosome,
+                                               contacts,
                                                attrs = attrs,
                                                parents = parents,
                                                children = children)
-        self.attrs['contacts'] = contacts
-        self.attrs['chromosome'] = chromosome
         
 class Hub(Feature):
     '''
@@ -393,12 +385,12 @@ class Hub(Feature):
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Hub, self).__init__('Hub',
-                                  name,
+        super(Hub, self).__init__(name,
+                                  chromosome,
+                                  None,
                                   attrs = attrs,
                                   parents = parents,
                                   children = children)
-        self.attrs['chromosome'] = chromosome
         self.attrs['conditions'] = []
         if children is None:
             self.children['experimental_hub'] = []
@@ -439,29 +431,44 @@ class Hub(Feature):
                                         
     def get_contact_data(self,
                          distance_cond = None,
-                         accepted_conditions = set(['naive','rexpos','rexneg','primed'])):
+                         accepted_conditions = set(['naive','rexpos','rexneg','primed']),
+                         hub_cond = lambda x: True,
+                         accepted_cells = None
+                        ):
+        if accepted_cells is None:
+            accepted_cells = self.get_cells()
         data = np.empty((0,4))
         
         if len(self.children['experimental_hub']) == 0:
             return data
          
         for hub in self.children['experimental_hub']:
-            if hub.attrs['condition'] in accepted_conditions:
-                cont_lengths = abs(np.mean(hub.attrs['contacts'][:,2:],
-                                           axis = 1) - np.mean(hub.attrs['contacts'][:,:2],
-                                                               axis = 1))
-                if distance_cond is not None:
-                    idxs = []
-                    for idx,item in enumerate(cont_lengths):
-                        if distance_cond(item):
-                            idxs.append(idx)
-                    idxs = np.array(idxs)
-                    if len(idxs) >0:
-                        contact_addition = hub.attrs['contacts'][idxs,:]
-                        data = np.append(data, contact_addition, axis = 0)
-                else:
-                    contact_addition = hub.attrs['contacts']
+            if not hub_cond(hub):
+                continue
+                
+            if hub.attrs['condition'] not in accepted_conditions:
+                continue
+                
+            if hub.attrs['cell'] not in accepted_cells[hub.attrs['condition']]:
+                continue
+                
+            cont_lengths = abs(np.mean(hub.attrs['regions'][:,2:],
+                                       axis = 1) - np.mean(hub.attrs['regions'][:,:2],
+                                                           axis = 1)
+                              )
+            
+            if distance_cond is not None:
+                idxs = []
+                for idx,item in enumerate(cont_lengths):
+                    if distance_cond(item):
+                        idxs.append(idx)
+                idxs = np.array(idxs)
+                if len(idxs) >0:
+                    contact_addition = hub.attrs['regions'][idxs,:]
                     data = np.append(data, contact_addition, axis = 0)
+            else:
+                contact_addition = hub.attrs['regions']
+                data = np.append(data, contact_addition, axis = 0)
          
         return data
 
@@ -469,8 +476,14 @@ class Hub(Feature):
                                    buffer = 1e4,
                                    distance_cond = None,
                                    accepted_conditions = set(['naive','rexpos','rexneg','primed']),
+                                   hub_cond = lambda x: True,
+                                   accepted_cells = None,
                                    region_type = 'regions'):
-        data = self.get_contact_data(distance_cond, accepted_conditions)
+        data = self.get_contact_data(distance_cond, 
+                                     accepted_conditions,
+                                     hub_cond,
+                                     accepted_cells,
+                                    )
         if data.shape[0] == 0:
             return None
         else:
@@ -497,20 +510,19 @@ class TAD(Feature_single_condition):
     def __init__(self,
                  fid,
                  condition,
-                 region,
                  chromosome,
+                 region,
                  attrs = None,
                  parents = None,
                  children = None):
                          
-        super(TAD,self).__init__('TAD',
-                                 fid,
+        super(TAD,self).__init__(fid,
                                  condition,
+                                 chromosome,
+                                 region,
                                  attrs = attrs,
                                  parents= parents,
                                  children = children)
-        self.attrs['region'] = region
-        self.attrs['chromosome'] = chromosome
                          
                          
                          
@@ -520,21 +532,20 @@ Gene Class
 class Gene(Feature):
     def __init__(self,
                  fid,
-                 genebody,
                  chromosome,
+                 genebody,
                  strand,
                  promoter = None,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Gene,self).__init__('gene',
-                                  fid,
+        super(Gene,self).__init__(fid,
+                                  chromosome,
+                                  genebody,
                                   attrs = attrs,
                                   parents= parents,
                                   children = children)
         self.attrs['strand'] = strand
-        self.attrs['region'] = genebody
-        self.attrs['chromosome'] = chromosome
         if promoter is not None:
             self.children['promoter'] = promoter
                          
@@ -544,20 +555,19 @@ Promoter Class
 class Promoter(Feature):
     def __init__(self,
                  fid,
-                 region,
                  chromosome,
+                 region,
                  strand,
                  gene = None,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Promoter,self).__init__('promoter',
-                                  fid,
-                                  attrs = attrs,
-                                  parents= parents,
-                                  children = children)
-        self.attrs['region'] = region
-        self.attrs['chromosome'] = chromosome
+        super(Promoter,self).__init__(fid,
+                                      chromosome,
+                                      region,
+                                      attrs = attrs,
+                                      parents= parents,
+                                      children = children)
         self.attrs['strand'] = strand
         if gene is not None:
             self.parents['gene'] = gene  
@@ -570,19 +580,18 @@ Enhancer Class
 class Enhancer(Feature):
     def __init__(self,
                  fid,
-                 region,
                  chromosome,
+                 region,
                  enhancer_type,
                  attrs = None,
                  parents = None,
                  children = None):
-        super(Enhancer,self).__init__('enhancer',
-                                      fid,
+        super(Enhancer,self).__init__(fid,
+                                      chromosome,
+                                      region,
                                       attrs = attrs,
                                       parents = parents,
                                       children = children)
-        self.attrs['region'] = region
-        self.attrs['chromosome'] = chromosome
         self.attrs['enhancer_type'] = enhancer_type
                          
         
