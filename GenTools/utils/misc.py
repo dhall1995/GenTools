@@ -1,4 +1,6 @@
+from numba import jit
 import numpy as np
+
 
 def moving_average(a, n=3):
     ret = np.cumsum(a, dtype=float)
@@ -32,32 +34,6 @@ def round_p_value(p):
     return i, np.floor(100*p)/100
     
 
-def one_hot(chrom): 
-    '''
-    Encodes a chromosome as a one-hot length 20 vector.
-    
-    Arguments:
-    
-    - chrom: A chromosome (string). For example, '2'.
-    
-    Returns: 
-    
-    - vals: A (1,20) shape array with a 1 in the
-            position corresponding to the input
-            chromosome
-    '''
-    vals = np.zeros((1,20))
-    
-    try:
-        c = int(chrom)
-        vals[0,c-1] = 1
-        return vals
-    except:
-        if chrom == 'X':
-            vals[0,-1] = 1
-            return vals
-        else:
-            raise ValueError
             
 def idx_to_bp(idx, chr_lims, binSize, chroms):
     '''
@@ -124,3 +100,44 @@ def bp_to_idx(bp, chrom, chr_lims, binSize):
             tot += (chr_lims[str(i)][1] - chr_lims[str(i)][0])/binSize
     
     return int(tot + chr_idx)
+
+
+
+def filter_bps(bp_arr, pos_arr, bin_size):
+    """
+    :: [bp] -> [bp] -> [idx]
+    """
+    low = pos_arr[0]
+    up = pos_arr[-1] + bin_size
+    idxs = np.logical_and(bp_arr >= low, bp_arr < up)
+    return (idxs)
+
+
+@jit("float32[:](int32[:], int32[:], double)", nopython=True, nogil=True, cache=True)
+def _bps_to_idx(bps, binning):
+
+    idxs = np.empty(bps.shape[0], dtype=np.float32)
+    idxs[:] = np.nan
+    for i in range(bps.shape[0]):
+        bp = bps[i]
+        for j in range(binning.shape[0]-1):
+            if (bp >= binning[j]) and (bp < binning[j+1]):
+                idxs[i] = j
+                break
+    return (idxs)
+
+
+def bp_to_idx(bp_arr, binning):
+    """
+    :: [bp] -> [bp] -> bp -> ([idx], [valid_idx_idx])
+    Array of idxs will be float, because int can't be nan.
+    Return the array of index values for the bp_arr,
+    with nan in invalid entries.
+    Also return a list of valid indexes.
+    """
+    idx_arr = _bps_to_idx(bp_arr, binning)
+    valid_input_idxs = ~np.isnan(idx_arr)
+
+    return (idx_arr.astype(np.int32), valid_input_idxs)
+
+
